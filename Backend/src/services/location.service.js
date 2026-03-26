@@ -1,3 +1,5 @@
+import fetch from "node-fetch";
+
 const getCountryFromCity = async (city) => {
     // Use OpenCage Geocoding API to get country from city
     const apiKey = process.env.OPENCAGE_API_KEY;

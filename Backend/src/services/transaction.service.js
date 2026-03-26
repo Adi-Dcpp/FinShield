@@ -1,4 +1,4 @@
-import Transaction from "../models/transaction.model";
+import Transaction from "../models/transaction.model.js";
 
 const getTxnCountLast10Min = async (userId) => {
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
@@ -29,8 +29,8 @@ const createTransaction = async ({
   const newTxn = await Transaction.create({
     userId,
     amount: transaction.amount,
-    device: transaction.device,
-    country: transaction.country,
+    deviceId: transaction.deviceId,
+    geoCountry: transaction.geoCountry,
     merchant: transaction.merchant,
     timestamp: transaction.timestamp || new Date(),
     riskPoint,

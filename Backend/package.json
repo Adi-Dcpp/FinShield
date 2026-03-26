@@ -14,8 +14,12 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "groq-sdk": "^1.1.2",
+    "mailgen": "^2.0.32",
     "mongodb": "^7.1.0",
-    "mongoose": "^9.3.1"
+    "mongoose": "^9.3.1",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^8.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

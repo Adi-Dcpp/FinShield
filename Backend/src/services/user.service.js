@@ -4,7 +4,7 @@ const updateUserStats = async(user, transaction) => {
     const newAvg = (user.avgTxnAmount * user.txnCount + amount) / newTxnCnt;
 
     if(!user.usualDevices.includes(deviceId)){
-        usualDevices.push(deviceId);
+        user.usualDevices.push(deviceId);
     }
 
     user.avgTxnAmount = newAvg;

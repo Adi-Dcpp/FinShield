@@ -1,11 +1,11 @@
 const calculateRisk = (user, transaction, txnCountIn10Mins) => {
   const riskFactors = [];
   let riskPoint = 0;
-  const { amount, country, device, hour, merchant = "" } = transaction;
+  const { amount, geoCountry, deviceId, hour, merchant = "" } = transaction;
   const { avgTxnAmount, homeCountry, usualDevices } = user;
-  const isNewDevice = !usualDevices.includes(device);
-  const isUnknownLocation = !country;
-  const isGeoMismatch = country && country !== homeCountry;
+  const isNewDevice = !usualDevices.includes(deviceId);
+  const isUnknownLocation = !geoCountry;
+  const isGeoMismatch = geoCountry && geoCountry !== homeCountry;
 
   if (amount > 3 * avgTxnAmount) {
     riskPoint += 25;
