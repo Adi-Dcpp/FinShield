@@ -7,17 +7,17 @@ const userSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      required: true,
-    },
+    // email: {
+    //   type: String,
+    //   required: true,
+    //   unique: true,
+    //   lowercase: true,
+    //   trim: true,
+    // },
+    // password: {
+    //   type: String,
+    //   required: true,
+    // },
     isNewUser: {
       type: Boolean,
       default: true,
@@ -26,10 +26,10 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    lastLogin: {
-      type: Date,
-      default: Date.now,
-    },
+    // lastLogin: {
+    //   type: Date,
+    //   default: Date.now,
+    // },
     homeCountry: {
       type: String,
       default: "IN",
