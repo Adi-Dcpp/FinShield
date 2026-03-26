@@ -7,41 +7,29 @@ const userSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    // email: {
-    //   type: String,
-    //   required: true,
-    //   unique: true,
-    //   lowercase: true,
-    //   trim: true,
-    // },
-    // password: {
-    //   type: String,
-    //   required: true,
-    // },
-    isNewUser: {
-      type: Boolean,
-      default: true,
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
     },
     usualDevices: {
       type: [String],
       default: [],
     },
-    // lastLogin: {
-    //   type: Date,
-    //   default: Date.now,
-    // },
     homeCountry: {
       type: String,
       default: "IN",
-    },
-    txnCount30d: {
-      type: Number,
-      default: 0,
     },
     avgTxnAmount: {
       type: Number,
       default: 0,
     },
+    txnCount: {
+      type: Number,
+      default: 0,
+    }
   },
   {
     timestamps: true,

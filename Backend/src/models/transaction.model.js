@@ -33,7 +33,7 @@ const transactionSchema = new mongoose.Schema({
     default: Date.now
   },
 
-  riskScore: {
+  riskPoint: {
     type: Number,
     default: 0
   },
@@ -49,9 +49,8 @@ const transactionSchema = new mongoose.Schema({
     default: "APPROVE"
   },
 
-  isAnomalous: {
-    type: Boolean,
-    default: false
+  merchant: {
+    type: String,
   }
 
 }, {
