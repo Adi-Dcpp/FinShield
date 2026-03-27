@@ -1,4 +1,4 @@
-import { User } from "../models/user.model.js";
+import User from "../models/user.model.js";
 import { ApiError } from "../utils/api-errors.util.js";
 import { ApiResponse } from "../utils/api-response.util.js";
 import { updateUserStats } from "../services/user.service.js";
@@ -104,8 +104,12 @@ const proceedTransaction = asyncHandler(async (req, res) => {
     if (!meta || !riskFactors || riskPoint === undefined) {
         throw new ApiError(400, "invalid transaction payload");
     }
-    if (!meta.amount || !meta.deviceId || !meta.geoCountry) {
+    if (meta.amount === undefined || !meta.deviceId || !meta.geoCountry) {
         throw new ApiError(400, "invalid meta data");
+    }
+
+    if (typeof riskPoint !== "number" || Number.isNaN(riskPoint)) {
+        throw new ApiError(400, "invalid risk score");
     }
 
     if (riskPoint < 0 || riskPoint > 100) {
@@ -152,8 +156,16 @@ const declineTransaction = asyncHandler(async (req, res) => {
     if (!meta || !riskFactors || riskPoint === undefined) {
         throw new ApiError(400, "invalid transaction payload");
     }
-    if (!meta.amount || !meta.deviceId || !meta.geoCountry) {
+    if (meta.amount === undefined || !meta.deviceId || !meta.geoCountry) {
         throw new ApiError(400, "invalid meta data");
+    }
+
+    if (typeof riskPoint !== "number" || Number.isNaN(riskPoint)) {
+        throw new ApiError(400, "invalid risk score");
+    }
+
+    if (riskPoint < 0 || riskPoint > 100) {
+        throw new ApiError(400, "invalid risk score");
     }
 
     const user = await User.findOne({ name });
