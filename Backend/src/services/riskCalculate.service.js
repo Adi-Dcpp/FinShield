@@ -7,7 +7,7 @@ const calculateRisk = (user, transaction, txnCountIn10Mins) => {
   const isUnknownLocation = !geoCountry;
   const isGeoMismatch = geoCountry && geoCountry !== homeCountry;
 
-  if (amount > 3 * avgTxnAmount) {
+  if (avgTxnAmount > 0 && amount > 3 * avgTxnAmount) {
     riskPoint += 25;
     riskFactors.push("HIGH_AMOUNT_SPIKE");
   }
@@ -70,3 +70,5 @@ const calculateRisk = (user, transaction, txnCountIn10Mins) => {
     riskPoint,
   };
 };
+
+export { calculateRisk }

@@ -11,11 +11,11 @@ const getCountryFromCity = async (city) => {
         if (data.results.length > 0) {
             return data.results[0].components.country_code.toUpperCase();
         } else {
-            throw new Error("No results found for the given city");
+            return null; // city not found
         }
     } catch (error) {
         console.error("Error fetching country from city:", error);
-        throw new Error("Failed to fetch country from city");
+        return null; // API error
     }   
 }
 

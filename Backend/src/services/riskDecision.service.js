@@ -7,3 +7,5 @@ const getDecision = (riskPoint) => {
     return "APPROVE";
   }
 };
+
+export { getDecision };
