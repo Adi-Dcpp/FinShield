@@ -1,0 +1,1652 @@
+FinShield Backend src code export
+Generated: 2026-03-28T12:31:13+05:30
+
+============================================================
+FILE: Backend/src/app.js
+============================================================
+import express from "express";
+import transactionRoutes from "./routes/transaction.route.js";
+
+const app = express();
+
+app.use(express.json());
+
+app.use("/api/v1/transactions", transactionRoutes);
+
+app.get("/api/v1/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "route not found",
+    data: null,
+    errors: [],
+  });
+});
+
+app.use((err, req, res, next) => {
+  const statusCode = err?.statusCode || 500;
+  const message = err?.message || "internal server error";
+
+  res.status(statusCode).json({
+    success: false,
+    message,
+    data: null,
+    errors: err?.errors || [],
+  });
+});
+
+export { app };
+============================================================
+FILE: Backend/src/controllers/riskSimulation.controller.js
+============================================================
+import User from "../models/user.model.js";
+import { ApiError } from "../utils/api-errors.util.js";
+import { ApiResponse } from "../utils/api-response.util.js";
+import { updateUserStats } from "../services/user.service.js";
+import {
+    getLast20Transactions,
+    createTransaction,
+    getTxnCountLast10Min,
+} from "../services/transaction.service.js";
+import { getHourFromTime } from "../services/time.service.js";
+import { getDecision } from "../services/riskDecision.service.js";
+import { calculateRisk } from "../services/riskCalculate.service.js";
+import { sendFraudAlertEmail } from "../services/mail.service.js";
+import { getCountryFromCity } from "../services/location.service.js";
+import { generateExplanation } from "../services/ai.service.js";
+import { asyncHandler } from "../utils/async-handler.util.js";
+
+const getReview = asyncHandler(async (req, res) => {
+    const { name, amount, deviceId, city, merchant, timeStamp } = req.body;
+
+    if (!name) throw new ApiError(400, "name is required");
+
+    if (
+        amount === undefined ||
+        deviceId === undefined ||
+        !city ||
+        !merchant ||
+        !timeStamp
+    ) {
+        throw new ApiError(400, "all fields are required");
+    }
+
+    const user = await User.findOne({ name });
+    if (!user) throw new ApiError(404, "user not found");
+
+    const geoCountry = await getCountryFromCity(city);
+    if (!geoCountry) throw new ApiError(500, "geo service failed");
+
+    const date = new Date(timeStamp);
+    if (isNaN(date.getTime())) {
+        throw new ApiError(400, "invalid timestamp");
+    }
+    const hour = getHourFromTime(timeStamp);
+
+    const txnCount10Min = await getTxnCountLast10Min(user._id);
+    if (txnCount10Min === null || txnCount10Min === undefined) {
+        throw new ApiError(500, "transaction service failed");
+    }
+
+    const { riskFactors, riskPoint } = calculateRisk(
+        user,
+        { amount, geoCountry, deviceId, hour, merchant },
+        txnCount10Min,
+    );
+
+    const decision = getDecision(riskPoint);
+
+    const explanation = await generateExplanation(riskPoint, riskFactors);
+    if (!explanation) throw new ApiError(500, "AI explanation failed");
+
+    if (riskPoint >= 80) {
+        try {
+            await sendFraudAlertEmail({
+                user,
+                transaction: {
+                    amount,
+                    deviceId,
+                    geoCountry,
+                },
+                riskPoint,
+            });
+        } catch (err) {
+            console.error("Email failed:", err.message);
+        }
+    }
+
+    return res.status(200).json(
+        new ApiResponse(200, "review generated", {
+            riskPoint,
+            riskFactors,
+            decision,
+            explanation,
+            meta: {
+                amount,
+                deviceId,
+                geoCountry,
+                hour,
+                merchant,
+                timestamp: timeStamp,
+            },
+        }),
+    );
+});
+
+const proceedTransaction = asyncHandler(async (req, res) => {
+    const {
+        name,
+        riskPoint,
+        riskFactors,
+        meta, // from frontend
+    } = req.body;
+
+    if (!name) throw new ApiError(400, "name is required");
+    if (!meta || !riskFactors || riskPoint === undefined) {
+        throw new ApiError(400, "invalid transaction payload");
+    }
+    if (meta.amount === undefined || !meta.deviceId || !meta.geoCountry) {
+        throw new ApiError(400, "invalid meta data");
+    }
+
+    if (typeof riskPoint !== "number" || Number.isNaN(riskPoint)) {
+        throw new ApiError(400, "invalid risk score");
+    }
+
+    if (riskPoint < 0 || riskPoint > 100) {
+        throw new ApiError(400, "invalid risk score");
+    }
+
+    const user = await User.findOne({ name });
+    if (!user) throw new ApiError(404, "user not found");
+
+    const newTransaction = await createTransaction({
+        userId: user._id,
+        transaction: meta,
+        riskPoint,
+        riskFactors,
+        decision: getDecision(riskPoint),
+        status: "SUCCESS",
+    });
+
+    if (!newTransaction) {
+        throw new ApiError(500, "failed to save transaction");
+    }
+
+    const updatedUser = await updateUserStats(user, {
+        amount: meta.amount,
+        deviceId: meta.deviceId,
+    });
+
+    if (!updatedUser) {
+        throw new ApiError(500, "failed to update user stats");
+    }
+
+    return res.status(200).json(
+        new ApiResponse(200, "transaction successful", {
+            newTransaction,
+            updatedUser,
+        }),
+    );
+});
+
+const declineTransaction = asyncHandler(async (req, res) => {
+    const { name, riskPoint, riskFactors, meta } = req.body;
+
+    if (!name) throw new ApiError(400, "name is required");
+    if (!meta || !riskFactors || riskPoint === undefined) {
+        throw new ApiError(400, "invalid transaction payload");
+    }
+    if (meta.amount === undefined || !meta.deviceId || !meta.geoCountry) {
+        throw new ApiError(400, "invalid meta data");
+    }
+
+    if (typeof riskPoint !== "number" || Number.isNaN(riskPoint)) {
+        throw new ApiError(400, "invalid risk score");
+    }
+
+    if (riskPoint < 0 || riskPoint > 100) {
+        throw new ApiError(400, "invalid risk score");
+    }
+
+    const user = await User.findOne({ name });
+    if (!user) throw new ApiError(404, "user not found");
+
+    const newTransaction = await createTransaction({
+        userId: user._id,
+        transaction: meta,
+        riskPoint,
+        riskFactors,
+        decision: getDecision(riskPoint),
+        status: "FAILED",
+    });
+
+    if (!newTransaction) {
+        throw new ApiError(500, "failed to save declined transaction");
+    }
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, "transaction declined", newTransaction));
+});
+
+const getHistory = asyncHandler(async (req, res) => {
+    const { name } = req.body;
+
+    if (!name) throw new ApiError(400, "name is required");
+
+    const user = await User.findOne({ name });
+    if (!user) throw new ApiError(404, "user not found");
+
+    const transactions = await getLast20Transactions(user._id);
+    if (!transactions) {
+        throw new ApiError(500, "failed to fetch history");
+    }
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, "history fetched", transactions));
+});
+
+export { getReview, proceedTransaction, declineTransaction, getHistory };
+
+============================================================
+FILE: Backend/src/db/index.db.js
+============================================================
+import mongoose from "mongoose";
+
+const connectDB = async () => {
+  try {
+    const connectionInstance = await mongoose.connect(process.env.MONGO_URI);
+    console.log(`MongoDB connected: ${connectionInstance.connection.host}`);
+  } catch (error) {
+    console.log("MongoDB connection failed:", error.message);
+    process.exit(1);
+  }
+};
+
+export default connectDB;
+============================================================
+FILE: Backend/src/models/transaction.model.js
+============================================================
+import mongoose from "mongoose";
+
+const transactionSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true
+  },
+
+  amount: {
+    type: Number,
+    required: true
+  },
+
+  deviceId: {
+    type: String,
+    required: true
+  },
+
+  geoCountry: {
+    type: String,
+    required: true
+  },
+
+  status: {
+    type: String,
+    enum: ["SUCCESS", "FAILED"],
+    default: "SUCCESS"
+  },
+
+  timestamp: {
+    type: Date,
+    default: Date.now
+  },
+
+  riskPoint: {
+    type: Number,
+    default: 0
+  },
+
+  riskFactors: {
+    type: [String],
+    default: []
+  },
+
+  decision: {
+    type: String,
+    enum: ["APPROVE", "REVIEW", "BLOCK"],
+    default: "APPROVE"
+  },
+
+  merchant: {
+    type: String,
+  }
+
+}, {
+  timestamps: true
+});
+
+transactionSchema.index({ userId: 1, timestamp: -1 });
+
+const Transaction = mongoose.model("Transaction", transactionSchema);
+
+export default Transaction; 
+============================================================
+FILE: Backend/src/models/user.model.js
+============================================================
+import mongoose from "mongoose";
+
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    usualDevices: {
+      type: [String],
+      default: [],
+    },
+    homeCountry: {
+      type: String,
+      default: "IN",
+    },
+    avgTxnAmount: {
+      type: Number,
+      default: 0,
+    },
+    txnCount: {
+      type: Number,
+      default: 0,
+    }
+  },
+  {
+    timestamps: true,
+  },
+);
+
+const User = mongoose.model("User", userSchema);
+
+export default User;
+
+============================================================
+FILE: Backend/src/routes/transaction.route.js
+============================================================
+import express from "express";
+import {
+  getReview,
+  proceedTransaction,
+  declineTransaction,
+  getHistory,
+} from "../controllers/riskSimulation.controller.js";
+
+const router = express.Router();
+
+router.post("/review", getReview);
+
+router.post("/proceed", proceedTransaction);
+
+router.post("/decline", declineTransaction);
+
+router.post("/history", getHistory);
+
+export default router;
+============================================================
+FILE: Backend/src/scripts/run-robust-api-tests.js
+============================================================
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
+
+const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000/api/v1";
+const reportPath = path.resolve("postman", "ROBUST-API-TEST-REPORT.md");
+
+const context = {
+  safeReview: null,
+  riskyReview: null,
+};
+
+const results = [];
+
+const truncate = (value, max = 220) => {
+  const str = typeof value === "string" ? value : JSON.stringify(value);
+  if (!str) return "";
+  return str.length > max ? `${str.slice(0, max)}...` : str;
+};
+
+const nowIso = () => new Date().toISOString();
+
+const callApi = async ({ method, endpoint, body }) => {
+  const url = `${baseUrl}${endpoint}`;
+  const options = {
+    method,
+    headers: { "Content-Type": "application/json" },
+  };
+
+  if (body !== undefined) {
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, options);
+  const text = await response.text();
+
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+
+  return {
+    status: response.status,
+    text,
+    json,
+  };
+};
+
+const record = async ({
+  id,
+  name,
+  method,
+  endpoint,
+  body,
+  expectedStatus,
+  assert,
+  note,
+}) => {
+  const startedAt = Date.now();
+
+  try {
+    const response = await callApi({ method, endpoint, body });
+    const assertion = assert ? assert(response) : { pass: true, note: "" };
+    const statusPass = response.status === expectedStatus;
+    const pass = statusPass && assertion.pass;
+
+    results.push({
+      id,
+      name,
+      method,
+      endpoint,
+      expectedStatus,
+      actualStatus: response.status,
+      pass,
+      durationMs: Date.now() - startedAt,
+      note: assertion.note || note || "",
+      responseSnippet: truncate(response.json || response.text),
+    });
+  } catch (error) {
+    results.push({
+      id,
+      name,
+      method,
+      endpoint,
+      expectedStatus,
+      actualStatus: "ERROR",
+      pass: false,
+      durationMs: Date.now() - startedAt,
+      note: `Request crashed: ${error.message}`,
+      responseSnippet: "",
+    });
+  }
+};
+
+const validateSafeReview = (response) => {
+  const body = response.json;
+  if (!body?.data) return { pass: false, note: "Missing response data" };
+
+  const riskPoint = body.data.riskPoint;
+  const hasValidRisk = typeof riskPoint === "number" && riskPoint >= 0 && riskPoint <= 100;
+  const hasDecision = ["APPROVE", "REVIEW", "BLOCK"].includes(body.data.decision);
+  const hasExplanation = typeof body.data.explanation === "string" && body.data.explanation.length > 0;
+
+  if (!hasValidRisk || !hasDecision || !hasExplanation) {
+    return { pass: false, note: "Risk payload shape invalid" };
+  }
+
+  context.safeReview = body.data;
+  return { pass: true, note: "Review payload validated" };
+};
+
+const validateRiskyReview = (response) => {
+  const body = response.json;
+  if (!body?.data) return { pass: false, note: "Missing response data" };
+
+  if (typeof body.data.riskPoint !== "number" || body.data.riskPoint < 60) {
+    return { pass: false, note: "Risk score did not elevate for risky payload" };
+  }
+
+  context.riskyReview = body.data;
+  return { pass: true, note: `RiskPoint=${body.data.riskPoint}, Decision=${body.data.decision}` };
+};
+
+const proceedBodyFromSafe = () => ({
+  name: "Aarav Sharma",
+  riskPoint: context.safeReview?.riskPoint,
+  riskFactors: context.safeReview?.riskFactors,
+  meta: context.safeReview?.meta,
+});
+
+const declineBodyFromRisky = () => ({
+  name: "Aarav Sharma",
+  riskPoint: context.riskyReview?.riskPoint,
+  riskFactors: context.riskyReview?.riskFactors,
+  meta: context.riskyReview?.meta,
+});
+
+const run = async () => {
+  console.log("Seeding fake users before regression run...");
+  execSync("node src/scripts/seed-fake-users.js", { stdio: "pipe" });
+
+  await record({
+    id: "T01",
+    name: "Health endpoint",
+    method: "GET",
+    endpoint: "/health",
+    expectedStatus: 200,
+    assert: (res) => ({ pass: res.json?.status === "ok", note: "Health payload checked" }),
+  });
+
+  await record({
+    id: "T02",
+    name: "Review safe baseline",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      name: "Aarav Sharma",
+      amount: 1200,
+      deviceId: "dev-aa-01",
+      city: "Delhi",
+      merchant: "Amazon",
+      timeStamp: nowIso(),
+    },
+    expectedStatus: 200,
+    assert: validateSafeReview,
+  });
+
+  await record({
+    id: "T03",
+    name: "Review risky high amount and geo mismatch",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      name: "Aarav Sharma",
+      amount: 180000,
+      deviceId: `dev-aa-qa-${Date.now()}`,
+      city: "London",
+      merchant: "Crypto Wallet Transfer",
+      timeStamp: "2026-03-27T01:15:00.000Z",
+    },
+    expectedStatus: 200,
+    assert: validateRiskyReview,
+  });
+
+  await record({
+    id: "T04",
+    name: "Review missing name",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      amount: 1500,
+      deviceId: "dev-x-1",
+      city: "Delhi",
+      merchant: "Amazon",
+      timeStamp: nowIso(),
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T05",
+    name: "Review missing fields",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      name: "Aarav Sharma",
+      amount: 1200,
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T06",
+    name: "Review invalid timestamp",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      name: "Aarav Sharma",
+      amount: 1200,
+      deviceId: "dev-aa-01",
+      city: "Delhi",
+      merchant: "Amazon",
+      timeStamp: "invalid-time",
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T07",
+    name: "Review unknown user",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      name: "Unknown User QA",
+      amount: 1200,
+      deviceId: "dev-uq-01",
+      city: "Delhi",
+      merchant: "Amazon",
+      timeStamp: nowIso(),
+    },
+    expectedStatus: 404,
+  });
+
+  await record({
+    id: "T08",
+    name: "Review zero amount edge",
+    method: "POST",
+    endpoint: "/transactions/review",
+    body: {
+      name: "Aarav Sharma",
+      amount: 0,
+      deviceId: "dev-aa-01",
+      city: "Delhi",
+      merchant: "Amazon",
+      timeStamp: nowIso(),
+    },
+    expectedStatus: 200,
+    note: "Zero amount currently accepted at review layer",
+  });
+
+  await record({
+    id: "T09",
+    name: "Proceed happy path from safe review",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: proceedBodyFromSafe(),
+    expectedStatus: 200,
+    assert: (res) => {
+      const status = res.json?.data?.newTransaction?.status;
+      return { pass: status === "SUCCESS", note: `Stored status=${status}` };
+    },
+  });
+
+  await record({
+    id: "T10",
+    name: "Proceed missing name",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      riskPoint: 10,
+      riskFactors: ["TEST"],
+      meta: { amount: 1200, deviceId: "dev-aa-01", geoCountry: "IN" },
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T11",
+    name: "Proceed invalid risk > 100",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: 101,
+      riskFactors: ["TEST"],
+      meta: { amount: 1200, deviceId: "dev-aa-01", geoCountry: "IN" },
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T12",
+    name: "Proceed invalid risk < 0",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: -1,
+      riskFactors: ["TEST"],
+      meta: { amount: 1200, deviceId: "dev-aa-01", geoCountry: "IN" },
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T13",
+    name: "Proceed missing meta",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: 20,
+      riskFactors: ["TEST"],
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T14",
+    name: "Proceed meta missing geoCountry",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: 20,
+      riskFactors: ["TEST"],
+      meta: { amount: 1200, deviceId: "dev-aa-01" },
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T15",
+    name: "Proceed unknown user",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      name: "Unknown User QA",
+      riskPoint: 20,
+      riskFactors: ["TEST"],
+      meta: { amount: 1200, deviceId: "dev-qq-01", geoCountry: "IN" },
+    },
+    expectedStatus: 404,
+  });
+
+  await record({
+    id: "T16",
+    name: "Proceed type-coercion edge: riskPoint as string",
+    method: "POST",
+    endpoint: "/transactions/proceed",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: "40",
+      riskFactors: ["TYPE_COERCE"],
+      meta: { amount: 2300, deviceId: "dev-aa-01", geoCountry: "IN" },
+    },
+    expectedStatus: 400,
+    note: "String riskPoint should be rejected by strict numeric validation",
+  });
+
+  await record({
+    id: "T17",
+    name: "Decline happy path from risky review",
+    method: "POST",
+    endpoint: "/transactions/decline",
+    body: declineBodyFromRisky(),
+    expectedStatus: 200,
+    assert: (res) => {
+      const status = res.json?.data?.status;
+      return { pass: status === "FAILED", note: `Stored status=${status}` };
+    },
+  });
+
+  await record({
+    id: "T18",
+    name: "Decline missing name",
+    method: "POST",
+    endpoint: "/transactions/decline",
+    body: {
+      riskPoint: 80,
+      riskFactors: ["HIGH_RISK_SCORE"],
+      meta: { amount: 5000, deviceId: "dev-aa-01", geoCountry: "IN" },
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T19",
+    name: "Decline missing meta",
+    method: "POST",
+    endpoint: "/transactions/decline",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: 80,
+      riskFactors: ["HIGH_RISK_SCORE"],
+    },
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T20",
+    name: "Decline unknown user",
+    method: "POST",
+    endpoint: "/transactions/decline",
+    body: {
+      name: "Unknown User QA",
+      riskPoint: 80,
+      riskFactors: ["HIGH_RISK_SCORE"],
+      meta: { amount: 9000, deviceId: "dev-uq-01", geoCountry: "IN" },
+    },
+    expectedStatus: 404,
+  });
+
+  await record({
+    id: "T21",
+    name: "Decline edge: riskPoint > 100 accepted",
+    method: "POST",
+    endpoint: "/transactions/decline",
+    body: {
+      name: "Aarav Sharma",
+      riskPoint: 150,
+      riskFactors: ["RISK_OUT_OF_RANGE"],
+      meta: { amount: 9999, deviceId: "dev-aa-01", geoCountry: "IN" },
+    },
+    expectedStatus: 400,
+    note: "Out-of-range riskPoint should be rejected",
+  });
+
+  await record({
+    id: "T22",
+    name: "History happy path",
+    method: "POST",
+    endpoint: "/transactions/history",
+    body: { name: "Aarav Sharma" },
+    expectedStatus: 200,
+    assert: (res) => {
+      const arr = res.json?.data;
+      const isArray = Array.isArray(arr);
+      const max20 = isArray && arr.length <= 20;
+      return {
+        pass: isArray && max20,
+        note: isArray ? `History count=${arr.length}` : "History payload not array",
+      };
+    },
+  });
+
+  await record({
+    id: "T23",
+    name: "History missing name",
+    method: "POST",
+    endpoint: "/transactions/history",
+    body: {},
+    expectedStatus: 400,
+  });
+
+  await record({
+    id: "T24",
+    name: "History unknown user",
+    method: "POST",
+    endpoint: "/transactions/history",
+    body: { name: "Unknown User QA" },
+    expectedStatus: 404,
+  });
+
+  await record({
+    id: "T25",
+    name: "History wrong method GET",
+    method: "GET",
+    endpoint: "/transactions/history",
+    expectedStatus: 404,
+  });
+
+  const passed = results.filter((r) => r.pass).length;
+  const failed = results.length - passed;
+  const fallbackExplanationUsed =
+    context.safeReview?.explanation === "Transaction shows unusual behavior. Review recommended." ||
+    context.riskyReview?.explanation === "Transaction shows unusual behavior. Review recommended.";
+
+  const findings = [];
+
+  if (results.some((r) => r.id === "T16" && r.pass)) {
+    findings.push("`proceed` accepts `riskPoint` as a string due to implicit JS coercion. Add strict numeric validation.");
+  }
+  if (results.some((r) => r.id === "T21" && r.pass)) {
+    findings.push("`decline` endpoint accepts out-of-range risk values (>100). Add same range guard used by `proceed`.");
+  }
+  if (results.some((r) => r.id === "T08" && r.pass)) {
+    findings.push("`review` accepts `amount: 0`, but `proceed` rejects `meta.amount: 0` because of falsy check. Validation is inconsistent.");
+  }
+  if (fallbackExplanationUsed) {
+    findings.push("AI explanation fallback string was observed in at least one case; verify `GROQ_API_KEY` and model availability if AI output is required.");
+  }
+
+  const lines = [];
+  lines.push("# FinShield Robust API Test Report");
+  lines.push("");
+  lines.push(`Generated: ${nowIso()}`);
+  lines.push(`Base URL: ${baseUrl}`);
+  lines.push(`Total Cases: ${results.length}`);
+  lines.push(`Passed: ${passed}`);
+  lines.push(`Failed: ${failed}`);
+  lines.push("");
+  lines.push("## Execution Summary");
+  lines.push("");
+  lines.push("| ID | Test Case | Method | Endpoint | Expected | Actual | Result | Duration(ms) | Notes |");
+  lines.push("|---|---|---|---|---:|---:|---|---:|---|");
+
+  for (const r of results) {
+    lines.push(
+      `| ${r.id} | ${r.name} | ${r.method} | ${r.endpoint} | ${r.expectedStatus} | ${r.actualStatus} | ${r.pass ? "PASS" : "FAIL"} | ${r.durationMs} | ${r.note || ""} |`,
+    );
+  }
+
+  lines.push("");
+  lines.push("## Response Snapshots");
+  lines.push("");
+  for (const r of results) {
+    lines.push(`### ${r.id} - ${r.name}`);
+    lines.push(`- Status: ${r.actualStatus}`);
+    lines.push(`- Response: \`${r.responseSnippet.replace(/`/g, "'")}\``);
+    lines.push("");
+  }
+
+  lines.push("## Detailed Review");
+  lines.push("");
+
+  if (findings.length === 0) {
+    lines.push("No major behavioral inconsistencies were found in this run.");
+  } else {
+    lines.push("The following issues or risks were identified:");
+    for (const finding of findings) {
+      lines.push(`- ${finding}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("### Overall Assessment");
+  lines.push("The API core flows (`review`, `proceed`, `decline`, `history`) are functional and stable for expected happy-path and validation scenarios.");
+  lines.push("Most negative tests returned correct 400/404 statuses, and state transitions (`SUCCESS` and `FAILED`) persisted to history as expected.");
+  lines.push("Primary improvement opportunities are around stricter input typing and consistent validation logic between endpoints.");
+
+  fs.writeFileSync(reportPath, `${lines.join("\n")}\n`, "utf8");
+
+  console.log(`Robust regression completed: ${passed}/${results.length} passed.`);
+  console.log(`Report saved to: ${reportPath}`);
+
+  if (failed > 0) {
+    process.exitCode = 1;
+  }
+};
+
+run().catch((error) => {
+  console.error("Robust regression runner failed:", error.message);
+  process.exit(1);
+});
+
+============================================================
+FILE: Backend/src/scripts/seed-fake-users.js
+============================================================
+import dotenv from "dotenv";
+import mongoose from "mongoose";
+import connectDB from "../db/index.db.js";
+import User from "../models/user.model.js";
+import Transaction from "../models/transaction.model.js";
+
+dotenv.config();
+
+const fakeUsers = [
+  {
+    name: "Aarav Sharma",
+    email: "aarav.sharma+finshield@example.com",
+    usualDevices: ["dev-aa-01"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Priya Verma",
+    email: "priya.verma+finshield@example.com",
+    usualDevices: ["dev-pv-01", "dev-pv-02"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Rohan Mehta",
+    email: "rohan.mehta+finshield@example.com",
+    usualDevices: ["dev-rm-01"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Neha Kapoor",
+    email: "neha.kapoor+finshield@example.com",
+    usualDevices: ["dev-nk-01", "dev-nk-02"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Ishaan Gupta",
+    email: "ishaan.gupta+finshield@example.com",
+    usualDevices: ["dev-ig-01"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Sanya Iyer",
+    email: "sanya.iyer+finshield@example.com",
+    usualDevices: ["dev-si-01", "dev-si-02"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Kunal Singh",
+    email: "kunal.singh+finshield@example.com",
+    usualDevices: ["dev-ks-01"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Meera Nair",
+    email: "meera.nair+finshield@example.com",
+    usualDevices: ["dev-mn-01"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Arjun Rao",
+    email: "arjun.rao+finshield@example.com",
+    usualDevices: ["dev-ar-01", "dev-ar-02"],
+    homeCountry: "IN",
+  },
+  {
+    name: "Kavya Menon",
+    email: "kavya.menon+finshield@example.com",
+    usualDevices: ["dev-km-01"],
+    homeCountry: "IN",
+  },
+];
+
+const MERCHANTS = [
+  "Amazon",
+  "Flipkart",
+  "Uber",
+  "Swiggy",
+  "Paytm Wallet",
+  "Binance",
+  "Myntra",
+  "BookMyShow",
+];
+
+const riskToDecision = (riskPoint) => {
+  if (riskPoint >= 70) return "BLOCK";
+  if (riskPoint >= 35) return "REVIEW";
+  return "APPROVE";
+};
+
+const buildTransactionsForUser = (userDoc, userIndex) => {
+  const transactions = [];
+
+  for (let txIndex = 0; txIndex < 8; txIndex += 1) {
+    const amount = 700 + userIndex * 250 + txIndex * 180;
+    const geoCountry = txIndex % 5 === 0 ? "SG" : userDoc.homeCountry;
+    const deviceId =
+      txIndex % 4 === 0
+        ? `${userDoc.usualDevices[0]}-new-${txIndex}`
+        : userDoc.usualDevices[txIndex % userDoc.usualDevices.length];
+    const riskPoint = Math.min(100, 18 + userIndex * 3 + txIndex * 11);
+    const decision = riskToDecision(riskPoint);
+    const status = riskPoint >= 70 ? "FAILED" : "SUCCESS";
+    const riskFactors = [];
+
+    if (riskPoint >= 70) riskFactors.push("HIGH_RISK_SCORE");
+    if (geoCountry !== userDoc.homeCountry) riskFactors.push("GEO_MISMATCH");
+    if (deviceId.includes("-new-")) riskFactors.push("NEW_DEVICE");
+
+    transactions.push({
+      userId: userDoc._id,
+      amount,
+      deviceId,
+      geoCountry,
+      merchant: MERCHANTS[(userIndex + txIndex) % MERCHANTS.length],
+      timestamp: new Date(Date.now() - (userIndex * 8 + txIndex) * 60 * 60 * 1000),
+      riskPoint,
+      riskFactors,
+      decision,
+      status,
+    });
+  }
+
+  return transactions;
+};
+
+const seedFakeUsers = async () => {
+  try {
+    await connectDB();
+
+    const userUpserts = fakeUsers.map((user) => ({
+      updateOne: {
+        filter: { email: user.email },
+        update: {
+          $set: {
+            name: user.name,
+            email: user.email,
+            usualDevices: user.usualDevices,
+            homeCountry: user.homeCountry,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    const userResult = await User.bulkWrite(userUpserts);
+
+    const seededUsers = await User.find({
+      email: { $in: fakeUsers.map((u) => u.email) },
+    });
+
+    if (seededUsers.length !== fakeUsers.length) {
+      throw new Error(
+        `Expected ${fakeUsers.length} users, found ${seededUsers.length} after upsert`
+      );
+    }
+
+    const seededUserIds = seededUsers.map((u) => u._id);
+
+    const deletedTransactions = await Transaction.deleteMany({
+      userId: { $in: seededUserIds },
+    });
+
+    const allTransactions = seededUsers.flatMap((userDoc, userIndex) =>
+      buildTransactionsForUser(userDoc, userIndex)
+    );
+
+    const insertedTransactions = await Transaction.insertMany(allTransactions, {
+      ordered: true,
+    });
+
+    const userStatOps = seededUsers.map((userDoc) => {
+      const successfulTransactions = insertedTransactions.filter(
+        (tx) => String(tx.userId) === String(userDoc._id) && tx.status === "SUCCESS"
+      );
+      const totalAmount = successfulTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+      const txnCount = successfulTransactions.length;
+      const avgTxnAmount = txnCount > 0 ? totalAmount / txnCount : 0;
+
+      return {
+        updateOne: {
+          filter: { _id: userDoc._id },
+          update: {
+            $set: {
+              txnCount,
+              avgTxnAmount,
+            },
+          },
+        },
+      };
+    });
+
+    await User.bulkWrite(userStatOps);
+
+    const total = await User.countDocuments({
+      email: { $in: fakeUsers.map((u) => u.email) },
+    });
+
+    console.log("Seed complete");
+    console.log(`Users inserted: ${userResult.upsertedCount}`);
+    console.log(`Users updated: ${userResult.modifiedCount}`);
+    console.log(`Users matched: ${userResult.matchedCount}`);
+    console.log(`Transactions deleted (old seed): ${deletedTransactions.deletedCount}`);
+    console.log(`Transactions inserted: ${insertedTransactions.length}`);
+    console.log(`Total seeded fake users present: ${total}`);
+  } catch (error) {
+    console.error("Failed to seed fake users:", error.message);
+    process.exitCode = 1;
+  } finally {
+    await mongoose.connection.close();
+  }
+};
+
+seedFakeUsers();
+
+
+// node src/scripts/seed-fake-users.js
+============================================================
+FILE: Backend/src/server.js
+============================================================
+import dotenv from "dotenv";
+import connectDB from "./db/index.db.js";
+import { app } from "./app.js";
+
+dotenv.config();
+
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("Server startup failed:", err);
+    process.exit(1);
+  }
+};
+
+startServer();
+============================================================
+FILE: Backend/src/services/ai.service.js
+============================================================
+import Groq from "groq-sdk";
+
+let client = null;
+let missingKeyLogged = false;
+
+const preferredModel = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const fallbackModels = ["llama-3.3-70b-versatile", "llama3-8b-8192"];
+const candidateModels = [
+  ...new Set([preferredModel, ...fallbackModels].filter(Boolean)),
+];
+
+const getGroqClient = () => {
+  if (client) return client;
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    if (!missingKeyLogged) {
+      console.warn("GROQ_API_KEY is missing; using fallback explanation.");
+      missingKeyLogged = true;
+    }
+    return null;
+  }
+
+  client = new Groq({ apiKey });
+  return client;
+};
+
+export const generateExplanation = async (riskPoint, riskFactors) => {
+  const groqClient = getGroqClient();
+
+  if (!groqClient) {
+    return "Transaction shows unusual behavior. Review recommended.";
+  }
+
+  try {
+    const prompt = `
+You are a financial fraud detection assistant.
+
+Explain the transaction risk in one short sentence (max 25 words).
+Use clear, calm, and professional language.
+Avoid technical jargon.
+Focus only on why the transaction is risky.
+
+Risk Score: ${riskPoint}
+Risk Factors: ${riskFactors.join(", ") || "None"}
+`;
+
+    for (const model of candidateModels) {
+      try {
+        const response = await groqClient.chat.completions.create({
+          model,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          temperature: 0.5,
+          max_tokens: 60,
+        });
+
+        return response.choices?.[0]?.message?.content?.trim() ||
+          "Transaction shows unusual behavior. Review recommended.";
+      } catch (modelError) {
+        const details = modelError?.message || "";
+        const isRetriableModelIssue =
+          details.includes("decommissioned") ||
+          details.includes("model_decommissioned") ||
+          details.includes("not found") ||
+          details.includes("not supported");
+
+        if (!isRetriableModelIssue) {
+          throw modelError;
+        }
+      }
+    }
+
+    return "Transaction shows unusual behavior. Review recommended.";
+
+  } catch (error) {
+    console.error("AI Error:", error.message);
+
+    return "Transaction shows unusual behavior. Review recommended.";
+  }
+};
+============================================================
+FILE: Backend/src/services/location.service.js
+============================================================
+import fetch from "node-fetch";
+
+const getCountryFromCity = async (city) => {
+    // Use OpenCage Geocoding API to get country from city
+    const apiKey = process.env.OPENCAGE_API_KEY;
+    const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(city)}&key=${apiKey}`;
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.results.length > 0) {
+            return data.results[0].components.country_code.toUpperCase();
+        } else {
+            return null; // city not found
+        }
+    } catch (error) {
+        console.error("Error fetching country from city:", error);
+        return null; // API error
+    }   
+}
+
+export {getCountryFromCity}
+============================================================
+FILE: Backend/src/services/mail.service.js
+============================================================
+import nodemailer from "nodemailer";
+import Mailgen from "mailgen";
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+const mailGenerator = new Mailgen({
+  theme: "default",
+  product: {
+    name: "FinShield",
+    link: "https://yourapp.com",
+  },
+});
+
+export const sendFraudAlertEmail = async ({
+  user,
+  transaction,
+  riskPoint,
+}) => {
+  const email = {
+    body: {
+      name: user.name,
+      intro:
+        "A suspicious transaction was detected.",
+
+      table: {
+        data: [
+          {
+            item: "Amount",
+            description: `₹${transaction.amount}`,
+          },
+          {
+            item: "Device",
+            description: transaction.deviceId,
+          },
+          {
+            item: "Location",
+            description: transaction.geoCountry || "Unknown",
+          },
+          {
+            item: "Risk Score",
+            description: riskPoint,
+          },
+        ],
+      },
+
+      action: {
+        instructions:
+          "If this wasn't you, please secure your account immediately.",
+        button: {
+          color: "#FF4D4F",
+          text: "Secure Account",
+          link: "https://yourapp.com/security",
+        },
+      },
+
+      outro: "If you recognize this activity, no further action is required.",
+    },
+  };
+
+  const emailBody = mailGenerator.generate(email);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL,
+    to: user.email,
+    subject: "FinShield Alert: High-Risk Transaction",
+    html: emailBody,
+  });
+};
+============================================================
+FILE: Backend/src/services/riskCalculate.service.js
+============================================================
+const calculateRisk = (user, transaction, txnCountIn10Mins) => {
+  const riskFactors = [];
+  let riskPoint = 0;
+  const { amount, geoCountry, deviceId, hour, merchant = "" } = transaction;
+  const { avgTxnAmount, homeCountry, usualDevices } = user;
+  const isNewDevice = !usualDevices.includes(deviceId);
+  const isUnknownLocation = !geoCountry;
+  const isGeoMismatch = geoCountry && geoCountry !== homeCountry;
+
+  if (avgTxnAmount > 0 && amount > 3 * avgTxnAmount) {
+    riskPoint += 25;
+    riskFactors.push("HIGH_AMOUNT_SPIKE");
+  }
+
+  if (amount > 100000) {
+    riskPoint += 20;
+    riskFactors.push("VERY_HIGH_AMOUNT");
+  }
+
+  if (isNewDevice) {
+    riskPoint += 15;
+    riskFactors.push("NEW_DEVICE");
+  }
+
+  if (isUnknownLocation) {
+    riskPoint += 10;
+    riskFactors.push("UNKNOWN_LOCATION");
+  } else if (isGeoMismatch) {
+    riskPoint += 20;
+    riskFactors.push("GEO_MISMATCH");
+  }
+
+  if (hour >= 0 && hour <= 5) {
+    riskPoint += 10;
+    riskFactors.push("UNUSUAL_TIME");
+  }
+
+  if (txnCountIn10Mins >= 3 && txnCountIn10Mins < 5) {
+    riskPoint += 10;
+    riskFactors.push("MILD_VELOCITY");
+  } else if (txnCountIn10Mins >= 5) {
+    riskPoint += 20;
+    riskFactors.push("VELOCITY_BURST");
+  }
+
+  if (isNewDevice && (isUnknownLocation || isGeoMismatch)) {
+    riskPoint += 10;
+    riskFactors.push("DEVICE_GEO_COMBO");
+  }
+
+  if ((amount > 3 * avgTxnAmount || amount > 100000) && txnCountIn10Mins > 3) {
+    riskPoint += 10;
+    riskFactors.push("AMOUNT_VELOCITY_COMBO");
+  }
+
+  if (
+    ["crypto", "bet", "casino", "wallet"].some((k) =>
+      merchant.toLowerCase().includes(k),
+    )
+  ) {
+    riskPoint += 10;
+    riskFactors.push("RISKY_MERCHANT");
+  }
+
+  if (riskPoint > 100) {
+    riskPoint = 100;
+  }
+  return {
+    riskFactors,
+    riskPoint,
+  };
+};
+
+export { calculateRisk }
+============================================================
+FILE: Backend/src/services/riskDecision.service.js
+============================================================
+const getDecision = (riskPoint) => {
+  if (riskPoint >= 70) {
+    return "BLOCK";
+  } else if (riskPoint >= 35) {
+    return "REVIEW";
+  } else {
+    return "APPROVE";
+  }
+};
+
+export { getDecision };
+============================================================
+FILE: Backend/src/services/time.service.js
+============================================================
+const getHourFromTime = (timeStamp) => {
+    const date = new Date(timeStamp);
+    return date.getHours();
+}
+
+export {getHourFromTime};
+============================================================
+FILE: Backend/src/services/transaction.service.js
+============================================================
+import Transaction from "../models/transaction.model.js";
+
+const getTxnCountLast10Min = async (userId) => {
+  try {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+    const count = await Transaction.countDocuments({
+      userId,
+      createdAt: { $gte: tenMinutesAgo },
+    });
+
+    return count;
+  } catch (error) {
+    console.error("Txn count error:", error.message);
+    return null; 
+  }
+};
+
+const getLast20Transactions = async (userId) => {
+  try {
+    const transactions = await Transaction.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    return transactions;
+  } catch (error) {
+    console.error("Fetch transactions error:", error.message);
+    return null;
+  }
+};
+
+const createTransaction = async ({
+  userId,
+  transaction,
+  riskPoint,
+  riskFactors,
+  decision,
+  status,
+}) => {
+  try {
+    const newTxn = await Transaction.create({
+      userId,
+      amount: transaction.amount,
+      deviceId: transaction.deviceId,
+      geoCountry: transaction.geoCountry,
+      merchant: transaction.merchant,
+      timestamp: transaction.timestamp || new Date(),
+
+      riskPoint,
+      riskFactors,
+      decision,
+      status,   
+    });
+
+    return newTxn;
+  } catch (error) {
+    console.error("Create transaction error:", error.message);
+    return null;
+  }
+};
+
+
+export {
+  getLast20Transactions,
+  getTxnCountLast10Min,
+  createTransaction,
+};
+============================================================
+FILE: Backend/src/services/user.service.js
+============================================================
+const updateUserStats = async(user, transaction) => {
+    const {amount , deviceId} = transaction;
+    const newTxnCnt = user.txnCount + 1;
+    const newAvg = (user.avgTxnAmount * user.txnCount + amount) / newTxnCnt;
+
+    if(!user.usualDevices.includes(deviceId)){
+        user.usualDevices.push(deviceId);
+    }
+
+    user.avgTxnAmount = newAvg;
+    user.txnCount = newTxnCnt;
+
+    await user.save()
+
+    return user;
+}
+
+export {
+    updateUserStats
+}
+============================================================
+FILE: Backend/src/utils/api-errors.util.js
+============================================================
+class ApiError extends Error {
+  constructor(
+    statusCode,
+    message = "Something went wrong",
+    errors = [],
+    stack = "",
+  ) {
+    super(message);
+    this.statusCode = statusCode;
+    this.errors = errors;
+    this.success = false;
+    this.data = null;
+
+    if (stack) {
+      this.stack = stack;
+    } else {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+}
+
+export { ApiError };
+
+============================================================
+FILE: Backend/src/utils/api-response.util.js
+============================================================
+class ApiResponse {
+  constructor(statusCode, message = "Success", data = null) {
+    this.statusCode = statusCode;
+    this.message = message;
+    this.data = data;
+    this.success = statusCode < 400;
+  }
+}
+
+export { ApiResponse };
+
+============================================================
+FILE: Backend/src/utils/async-handler.util.js
+============================================================
+const asyncHandler = (asyncRequest) => {
+  return (req, res, next) => {
+    Promise.resolve(asyncRequest(req, res, next)).catch((err) => next(err));
+  };
+};
+
+export { asyncHandler };

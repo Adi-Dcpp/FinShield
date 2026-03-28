@@ -1,11 +1,14 @@
 import express from "express";
 import transactionRoutes from "./routes/transaction.route.js";
+import messageRoutes from "./routes/message.route.js";
 
 const app = express();
 
 app.use(express.json());
 
 app.use("/api/v1/transactions", transactionRoutes);
+
+app.use("/api/v1/messages", messageRoutes);
 
 app.get("/api/v1/health", (req, res) => {
   res.status(200).json({ status: "ok" });

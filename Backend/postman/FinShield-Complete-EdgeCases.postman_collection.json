@@ -1,0 +1,449 @@
+{
+  "info": {
+    "name": "FinShield Complete API - Edge & Regression Suite",
+    "description": "Complete Postman suite for all current backend routes: health, transactions, and messages/check. Includes happy paths, validation negatives, boundaries, malformed payloads, method errors, and stateful flow assertions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "5f1ef8be-3f5a-4fc2-b9b0-a788dcbf4f20"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('baseUrl')) pm.environment.set('baseUrl', 'http://localhost:3000/api/v1');",
+          "if (!pm.environment.get('fakeUserName')) pm.environment.set('fakeUserName', 'Aarav Sharma');",
+          "if (!pm.environment.get('fakeUserTwo')) pm.environment.set('fakeUserTwo', 'Priya Verma');",
+          "pm.collectionVariables.set('runId', String(Date.now()));",
+          "if (!pm.collectionVariables.get('safeMeta')) pm.collectionVariables.set('safeMeta', '{}');",
+          "if (!pm.collectionVariables.get('riskMeta')) pm.collectionVariables.set('riskMeta', '{}');",
+          "if (!pm.collectionVariables.get('safeRiskFactors')) pm.collectionVariables.set('safeRiskFactors', '[]');",
+          "if (!pm.collectionVariables.get('riskFactors')) pm.collectionVariables.set('riskFactors', '[]');"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Smoke",
+      "item": [
+        {
+          "name": "GET /health - service up",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('health payload', function () { pm.expect(body.status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02. Transactions - Review",
+      "item": [
+        {
+          "name": "POST /transactions/review - safe baseline",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"amount\": 1200,\n  \"deviceId\": \"dev-aa-01\",\n  \"city\": \"Delhi\",\n  \"merchant\": \"Amazon\",\n  \"timeStamp\": \"{{$isoTimestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transactions/review",
+              "host": ["{{baseUrl}}"],
+              "path": ["transactions", "review"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('core fields present', function () {",
+                  "  pm.expect(body.success).to.eql(true);",
+                  "  pm.expect(body.data.riskPoint).to.be.within(0, 100);",
+                  "  pm.expect(['APPROVE', 'REVIEW', 'BLOCK']).to.include(body.data.decision);",
+                  "  pm.expect(body.data.riskFactors).to.be.an('array');",
+                  "  pm.expect(body.data.meta).to.be.an('object');",
+                  "});",
+                  "pm.collectionVariables.set('safeRiskPoint', String(body.data.riskPoint));",
+                  "pm.collectionVariables.set('safeRiskFactors', JSON.stringify(body.data.riskFactors));",
+                  "pm.collectionVariables.set('safeMeta', JSON.stringify(body.data.meta));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /transactions/review - high risk sample",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"amount\": 180000,\n  \"deviceId\": \"dev-new-{{runId}}\",\n  \"city\": \"London\",\n  \"merchant\": \"Crypto Wallet Transfer\",\n  \"timeStamp\": \"2026-03-27T01:15:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transactions/review",
+              "host": ["{{baseUrl}}"],
+              "path": ["transactions", "review"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('risk elevated', function () { pm.expect(body.data.riskPoint).to.be.at.least(60); });",
+                  "pm.collectionVariables.set('riskPoint', String(body.data.riskPoint));",
+                  "pm.collectionVariables.set('riskFactors', JSON.stringify(body.data.riskFactors));",
+                  "pm.collectionVariables.set('riskMeta', JSON.stringify(body.data.meta));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /transactions/review - missing name",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"amount\": 1500,\n  \"deviceId\": \"dev-x-1\",\n  \"city\": \"Delhi\",\n  \"merchant\": \"Amazon\",\n  \"timeStamp\": \"{{$isoTimestamp}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/review", "host": ["{{baseUrl}}"], "path": ["transactions", "review"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/review - missing fields",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"amount\": 1200\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/review", "host": ["{{baseUrl}}"], "path": ["transactions", "review"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/review - invalid timestamp",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"amount\": 1200,\n  \"deviceId\": \"dev-aa-01\",\n  \"city\": \"Delhi\",\n  \"merchant\": \"Amazon\",\n  \"timeStamp\": \"not-a-date\"\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/review", "host": ["{{baseUrl}}"], "path": ["transactions", "review"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/review - unknown user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Unknown User QA\",\n  \"amount\": 1200,\n  \"deviceId\": \"dev-uq-01\",\n  \"city\": \"Delhi\",\n  \"merchant\": \"Amazon\",\n  \"timeStamp\": \"{{$isoTimestamp}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/review", "host": ["{{baseUrl}}"], "path": ["transactions", "review"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 404', function () { pm.response.to.have.status(404); });"] } }]
+        },
+        {
+          "name": "POST /transactions/review - zero amount edge",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"amount\": 0,\n  \"deviceId\": \"dev-aa-01\",\n  \"city\": \"Delhi\",\n  \"merchant\": \"Amazon\",\n  \"timeStamp\": \"{{$isoTimestamp}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/review", "host": ["{{baseUrl}}"], "path": ["transactions", "review"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 200', function () { pm.response.to.have.status(200); });"] } }]
+        }
+      ]
+    },
+    {
+      "name": "03. Transactions - Proceed",
+      "item": [
+        {
+          "name": "POST /transactions/proceed - happy path",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"riskPoint\": {{safeRiskPoint}},\n  \"riskFactors\": {{safeRiskFactors}},\n  \"meta\": {{safeMeta}}\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/transactions/proceed", "host": ["{{baseUrl}}"], "path": ["transactions", "proceed"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+            "const body = pm.response.json();",
+            "pm.test('status persisted SUCCESS', function () { pm.expect(body.data.newTransaction.status).to.eql('SUCCESS'); });"
+          ] } }]
+        },
+        {
+          "name": "POST /transactions/proceed - missing name",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"riskPoint\": 20,\n  \"riskFactors\": [\"TEST\"],\n  \"meta\": {\"amount\": 1200, \"deviceId\": \"dev-aa-01\", \"geoCountry\": \"IN\"}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/proceed", "host": ["{{baseUrl}}"], "path": ["transactions", "proceed"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/proceed - riskPoint as string",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"riskPoint\": \"40\",\n  \"riskFactors\": [\"TYPE_COERCE\"],\n  \"meta\": {\"amount\": 2300, \"deviceId\": \"dev-aa-01\", \"geoCountry\": \"IN\"}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/proceed", "host": ["{{baseUrl}}"], "path": ["transactions", "proceed"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/proceed - riskPoint out of range",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"riskPoint\": 150,\n  \"riskFactors\": [\"RISK_OUT_OF_RANGE\"],\n  \"meta\": {\"amount\": 2300, \"deviceId\": \"dev-aa-01\", \"geoCountry\": \"IN\"}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/proceed", "host": ["{{baseUrl}}"], "path": ["transactions", "proceed"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/proceed - missing meta",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"riskPoint\": 20,\n  \"riskFactors\": [\"TEST\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/proceed", "host": ["{{baseUrl}}"], "path": ["transactions", "proceed"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/proceed - missing geoCountry in meta",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"riskPoint\": 20,\n  \"riskFactors\": [\"TEST\"],\n  \"meta\": {\"amount\": 1200, \"deviceId\": \"dev-aa-01\"}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/proceed", "host": ["{{baseUrl}}"], "path": ["transactions", "proceed"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        }
+      ]
+    },
+    {
+      "name": "04. Transactions - Decline",
+      "item": [
+        {
+          "name": "POST /transactions/decline - happy path",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\",\n  \"riskPoint\": {{riskPoint}},\n  \"riskFactors\": {{riskFactors}},\n  \"meta\": {{riskMeta}}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/decline", "host": ["{{baseUrl}}"], "path": ["transactions", "decline"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+            "const body = pm.response.json();",
+            "pm.test('status persisted FAILED', function () { pm.expect(body.data.status).to.eql('FAILED'); });"
+          ] } }]
+        },
+        {
+          "name": "POST /transactions/decline - missing name",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"riskPoint\": 80,\n  \"riskFactors\": [\"HIGH_RISK_SCORE\"],\n  \"meta\": {\"amount\": 5000, \"deviceId\": \"dev-aa-01\", \"geoCountry\": \"IN\"}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/decline", "host": ["{{baseUrl}}"], "path": ["transactions", "decline"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/decline - unknown user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Unknown User QA\",\n  \"riskPoint\": 80,\n  \"riskFactors\": [\"HIGH_RISK_SCORE\"],\n  \"meta\": {\"amount\": 9000, \"deviceId\": \"dev-uq-01\", \"geoCountry\": \"IN\"}\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/decline", "host": ["{{baseUrl}}"], "path": ["transactions", "decline"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 404', function () { pm.response.to.have.status(404); });"] } }]
+        }
+      ]
+    },
+    {
+      "name": "05. Transactions - History",
+      "item": [
+        {
+          "name": "POST /transactions/history - happy path",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{fakeUserName}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/history", "host": ["{{baseUrl}}"], "path": ["transactions", "history"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+            "const body = pm.response.json();",
+            "pm.test('data is array', function () { pm.expect(Array.isArray(body.data)).to.eql(true); });",
+            "pm.test('history max 20', function () { pm.expect(body.data.length).to.be.at.most(20); });"
+          ] } }]
+        },
+        {
+          "name": "POST /transactions/history - missing name",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/transactions/history", "host": ["{{baseUrl}}"], "path": ["transactions", "history"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /transactions/history - unknown user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Unknown User QA\"\n}" },
+            "url": { "raw": "{{baseUrl}}/transactions/history", "host": ["{{baseUrl}}"], "path": ["transactions", "history"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 404', function () { pm.response.to.have.status(404); });"] } }]
+        },
+        {
+          "name": "GET /transactions/history - wrong method",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/transactions/history", "host": ["{{baseUrl}}"], "path": ["transactions", "history"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 404', function () { pm.response.to.have.status(404); });"] } }]
+        }
+      ]
+    },
+    {
+      "name": "06. Messages API - Edge Cases",
+      "item": [
+        {
+          "name": "POST /messages/check - safe text",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"Your EMI is due tomorrow.\"\n}" },
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+            "const body = pm.response.json();",
+            "pm.test('response shape', function () {",
+            "  pm.expect(body.success).to.eql(true);",
+            "  pm.expect(body.data.classification).to.be.a('string');",
+            "  pm.expect(body.data.signals).to.be.an('array');",
+            "  pm.expect(body.data.explanation).to.be.a('string');",
+            "  pm.expect(body.data.riskLevel).to.be.a('string');",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "POST /messages/check - fraud text",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"You won Rs10000! Click http://fake-link.biz now\"\n}" },
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 200', function () { pm.response.to.have.status(200); });",
+            "const body = pm.response.json();",
+            "pm.test('classification in allowed set', function () { pm.expect(['SAFE','CAUTION','SUSPICIOUS','FRAUD']).to.include(body.data.classification); });"
+          ] } }]
+        },
+        {
+          "name": "POST /messages/check - missing text",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /messages/check - text is number",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": 12345\n}" },
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "POST /messages/check - whitespace only",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"    \"\n}" },
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 200', function () { pm.response.to.have.status(200); });"] } }]
+        },
+        {
+          "name": "POST /messages/check - large payload",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now urgent verify now\"\n}" },
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 200 or 500', function () { pm.expect([200,500]).to.include(pm.response.code); });"] } }]
+        },
+        {
+          "name": "GET /messages/check - wrong method",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/messages/check", "host": ["{{baseUrl}}"], "path": ["messages", "check"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status 404', function () { pm.response.to.have.status(404); });"] } }]
+        }
+      ]
+    },
+    {
+      "name": "07. Global Negative",
+      "item": [
+        {
+          "name": "Unknown route",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/does-not-exist", "host": ["{{baseUrl}}"], "path": ["does-not-exist"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status 404', function () { pm.response.to.have.status(404); });",
+            "const body = pm.response.json();",
+            "pm.test('not found payload', function () { pm.expect(body.message).to.eql('route not found'); });"
+          ] } }]
+        }
+      ]
+    }
+  ]
+}
