@@ -58,7 +58,10 @@ const getReview = asyncHandler(async (req, res) => {
     const explanation = await generateExplanation(riskPoint, riskFactors);
     if (!explanation) throw new ApiError(500, "AI explanation failed");
 
+    let emailAlert = "NOT_TRIGGERED";
+
     if (riskPoint >= 80) {
+        emailAlert = "TRIGGERED";
         try {
             await sendFraudAlertEmail({
                 user,
@@ -69,7 +72,9 @@ const getReview = asyncHandler(async (req, res) => {
                 },
                 riskPoint,
             });
+            emailAlert = "SENT";
         } catch (err) {
+            emailAlert = "FAILED";
             console.error("Email failed:", err.message);
         }
     }
@@ -87,6 +92,7 @@ const getReview = asyncHandler(async (req, res) => {
                 hour,
                 merchant,
                 timestamp: timeStamp,
+                emailAlert,
             },
         }),
     );

@@ -19,7 +19,8 @@
     "mongodb": "^7.1.0",
     "mongoose": "^9.3.1",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^8.0.4"
+    "nodemailer": "^8.0.4",
+    "sib-api-v3-sdk": "^8.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

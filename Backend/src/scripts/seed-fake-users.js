@@ -8,6 +8,24 @@ dotenv.config();
 
 const fakeUsers = [
   {
+    name: "Adi",
+    email: "bt24ec025@nitmz.ac.in",
+    usualDevices: ["dev-bt24ec025-01"],
+    homeCountry: "IN",
+  },
+  {
+    name: "gaurav",
+    email: "kgaurav3257@gmail.com",
+    usualDevices: ["dev-kgaurav-01", "dev-kgaurav-02"],
+    homeCountry: "IN",
+  },
+  {
+    name: "abhijeet",
+    email: "bt24ec014@nitmz.ac.in",
+    usualDevices: ["dev-bt24ec014-01"],
+    homeCountry: "IN",
+  },
+  {
     name: "Aarav Sharma",
     email: "aarav.sharma+finshield@example.com",
     usualDevices: ["dev-aa-01"],

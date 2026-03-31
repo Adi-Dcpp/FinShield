@@ -1,13 +1,9 @@
-import nodemailer from "nodemailer";
+import SibApiV3Sdk from "sib-api-v3-sdk";
 import Mailgen from "mailgen";
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const client = SibApiV3Sdk.ApiClient.instance;
+
+const emailApi = new SibApiV3Sdk.TransactionalEmailsApi();
 
 const mailGenerator = new Mailgen({
   theme: "default",
@@ -22,11 +18,21 @@ export const sendFraudAlertEmail = async ({
   transaction,
   riskPoint,
 }) => {
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error("BREVO_API_KEY is missing");
+  }
+
+  if (!process.env.BREVO_SENDER_EMAIL) {
+    throw new Error("BREVO_SENDER_EMAIL is missing");
+  }
+
+  // Ensure the key is attached after env is loaded and before each send call.
+  client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
+
   const email = {
     body: {
       name: user.name,
-      intro:
-        "A suspicious transaction was detected.",
+      intro: "A suspicious transaction was detected.",
 
       table: {
         data: [
@@ -65,10 +71,23 @@ export const sendFraudAlertEmail = async ({
 
   const emailBody = mailGenerator.generate(email);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL,
-    to: user.email,
-    subject: "FinShield Alert: High-Risk Transaction",
-    html: emailBody,
-  });
+  try {
+    await emailApi.sendTransacEmail({
+      sender: {
+        email: process.env.BREVO_SENDER_EMAIL,
+        name: "FinShield",
+      },
+      to: [{ email: user.email }],
+      subject: "🚨 FinShield Alert: High-Risk Transaction",
+      htmlContent: emailBody,
+    });
+  } catch (err) {
+    const providerMessage =
+      err?.response?.body?.message ||
+      err?.response?.text ||
+      err?.message ||
+      "unknown mail provider error";
+
+    throw new Error(`Brevo send failed: ${providerMessage}`);
+  }
 };
