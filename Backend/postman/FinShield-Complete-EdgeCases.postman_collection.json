@@ -83,7 +83,7 @@
                   "pm.test('core fields present', function () {",
                   "  pm.expect(body.success).to.eql(true);",
                   "  pm.expect(body.data.riskPoint).to.be.within(0, 100);",
-                  "  pm.expect(['APPROVE', 'REVIEW', 'BLOCK']).to.include(body.data.decision);",
+                  "  pm.expect(['LOW_RISK', 'MEDIUM_RISK', 'HIGH_RISK']).to.include(body.data.decision);",
                   "  pm.expect(body.data.riskFactors).to.be.an('array');",
                   "  pm.expect(body.data.meta).to.be.an('object');",
                   "});",

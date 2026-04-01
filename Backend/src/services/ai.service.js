@@ -25,24 +25,52 @@ const getGroqClient = () => {
   return client;
 };
 
-export const generateExplanation = async (riskPoint, riskFactors) => {
+export const generateExplanation = async (riskPoint, riskFactors, decision) => {
+  const normalizedDecision = ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"].includes(decision)
+    ? decision
+    : riskPoint >= 70
+      ? "HIGH_RISK"
+      : riskPoint >= 35
+        ? "MEDIUM_RISK"
+        : "LOW_RISK";
+  const safeRiskFactors = Array.isArray(riskFactors) ? riskFactors : [];
+
+  const fallbackByDecision = {
+    LOW_RISK:
+      "Transaction appears consistent with normal behavior. No significant risk indicators detected.",
+    MEDIUM_RISK:
+      "Transaction has moderate risk signals and should be reviewed before final approval.",
+    HIGH_RISK:
+      "Transaction shows strong fraud indicators and should be blocked for user protection.",
+  };
+
+  const fallbackExplanation = fallbackByDecision[normalizedDecision];
   const groqClient = getGroqClient();
 
   if (!groqClient) {
-    return "Transaction shows unusual behavior. Review recommended.";
+    return fallbackExplanation;
   }
 
   try {
     const prompt = `
 You are a financial fraud detection assistant.
 
-Explain the transaction risk in one short sentence (max 25 words).
-Use clear, calm, and professional language.
-Avoid technical jargon.
-Focus only on why the transaction is risky.
+Write exactly one sentence, max 28 words.
+Tone: clear, calm, professional.
+Do not use technical jargon.
+Do not mention percentages, probabilities, policies, or legal language.
 
+Hard rules:
+1) You must stay fully consistent with the provided Decision.
+2) If Decision is LOW_RISK, the sentence must indicate low risk / safe to proceed.
+3) If Decision is MEDIUM_RISK, the sentence must indicate moderate concern and recommend review.
+4) If Decision is HIGH_RISK, the sentence must indicate high risk and recommend blocking.
+5) Mention only reasons present in Risk Factors. Do not invent new reasons.
+6) If Risk Factors is None, state that no strong risk indicators were detected.
+
+Decision: ${normalizedDecision}
 Risk Score: ${riskPoint}
-Risk Factors: ${riskFactors.join(", ") || "None"}
+Risk Factors: ${safeRiskFactors.join(", ") || "None"}
 `;
 
     for (const model of candidateModels) {
@@ -55,12 +83,12 @@ Risk Factors: ${riskFactors.join(", ") || "None"}
               content: prompt,
             },
           ],
-          temperature: 0.5,
+          temperature: 0.2,
           max_tokens: 60,
         });
 
         return response.choices?.[0]?.message?.content?.trim() ||
-          "Transaction shows unusual behavior. Review recommended.";
+          fallbackExplanation;
       } catch (modelError) {
         const details = modelError?.message || "";
         const isRetriableModelIssue =
@@ -75,11 +103,11 @@ Risk Factors: ${riskFactors.join(", ") || "None"}
       }
     }
 
-    return "Transaction shows unusual behavior. Review recommended.";
+    return fallbackExplanation;
 
   } catch (error) {
     console.error("AI Error:", error.message);
 
-    return "Transaction shows unusual behavior. Review recommended.";
+    return fallbackExplanation;
   }
 };

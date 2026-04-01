@@ -45,8 +45,8 @@ const transactionSchema = new mongoose.Schema({
 
   decision: {
     type: String,
-    enum: ["APPROVE", "REVIEW", "BLOCK"],
-    default: "APPROVE"
+    enum: ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"],
+    default: "LOW_RISK"
   },
 
   merchant: {

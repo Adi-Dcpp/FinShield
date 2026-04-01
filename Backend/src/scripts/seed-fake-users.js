@@ -99,9 +99,9 @@ const MERCHANTS = [
 ];
 
 const riskToDecision = (riskPoint) => {
-  if (riskPoint >= 70) return "BLOCK";
-  if (riskPoint >= 35) return "REVIEW";
-  return "APPROVE";
+  if (riskPoint >= 70) return "HIGH_RISK";
+  if (riskPoint >= 35) return "MEDIUM_RISK";
+  return "LOW_RISK";
 };
 
 const buildTransactionsForUser = (userDoc, userIndex) => {

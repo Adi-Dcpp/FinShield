@@ -61,7 +61,7 @@ Use this before calling `proceed` or `decline`.
   "data": {
     "riskPoint": 20,
     "riskFactors": ["VELOCITY_BURST"],
-    "decision": "APPROVE",
+    "decision": "LOW_RISK",
     "explanation": "Transaction explanation text...",
     "meta": {
       "amount": 1200,
@@ -121,7 +121,7 @@ Use `riskPoint`, `riskFactors`, and `meta` directly from `/transactions/review` 
       "geoCountry": "IN",
       "riskPoint": 20,
       "riskFactors": ["VELOCITY_BURST"],
-      "decision": "APPROVE",
+      "decision": "LOW_RISK",
       "status": "SUCCESS"
     },
     "updatedUser": {
@@ -184,7 +184,7 @@ Same payload pattern as `/transactions/proceed`.
     "geoCountry": "GB",
     "riskPoint": 95,
     "riskFactors": ["HIGH_AMOUNT_SPIKE", "GEO_MISMATCH"],
-    "decision": "BLOCK",
+    "decision": "HIGH_RISK",
     "status": "FAILED"
   },
   "success": true
@@ -227,7 +227,7 @@ Same payload pattern as `/transactions/proceed`.
       "geoCountry": "IN",
       "riskPoint": 20,
       "riskFactors": ["VELOCITY_BURST"],
-      "decision": "APPROVE",
+      "decision": "LOW_RISK",
       "status": "SUCCESS",
       "createdAt": "..."
     }

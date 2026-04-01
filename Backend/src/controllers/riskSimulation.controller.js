@@ -55,7 +55,7 @@ const getReview = asyncHandler(async (req, res) => {
 
     const decision = getDecision(riskPoint);
 
-    const explanation = await generateExplanation(riskPoint, riskFactors);
+    const explanation = await generateExplanation(riskPoint, riskFactors, decision);
     if (!explanation) throw new ApiError(500, "AI explanation failed");
 
     let emailAlert = "NOT_TRIGGERED";

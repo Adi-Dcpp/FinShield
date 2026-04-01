@@ -1,10 +1,10 @@
 const getDecision = (riskPoint) => {
   if (riskPoint >= 70) {
-    return "BLOCK";
+    return "HIGH_RISK";
   } else if (riskPoint >= 35) {
-    return "REVIEW";
+    return "MEDIUM_RISK";
   } else {
-    return "APPROVE";
+    return "LOW_RISK";
   }
 };
 

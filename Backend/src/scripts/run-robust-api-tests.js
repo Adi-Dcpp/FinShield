@@ -100,7 +100,7 @@ const validateSafeReview = (response) => {
 
   const riskPoint = body.data.riskPoint;
   const hasValidRisk = typeof riskPoint === "number" && riskPoint >= 0 && riskPoint <= 100;
-  const hasDecision = ["APPROVE", "REVIEW", "BLOCK"].includes(body.data.decision);
+  const hasDecision = ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"].includes(body.data.decision);
   const hasExplanation = typeof body.data.explanation === "string" && body.data.explanation.length > 0;
 
   if (!hasValidRisk || !hasDecision || !hasExplanation) {
