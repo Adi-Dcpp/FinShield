@@ -16,11 +16,11 @@ const getTxnCountLast10Min = async (userId) => {
   }
 };
 
-const getLast20Transactions = async (userId) => {
+const getLast100Transactions = async (userId) => {
   try {
     const transactions = await Transaction.find({ userId })
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(100);
 
     return transactions;
   } catch (error) {
@@ -61,7 +61,7 @@ const createTransaction = async ({
 
 
 export {
-  getLast20Transactions,
+  getLast100Transactions,
   getTxnCountLast10Min,
   createTransaction,
 };

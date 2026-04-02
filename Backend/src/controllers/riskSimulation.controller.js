@@ -3,7 +3,7 @@ import { ApiError } from "../utils/api-errors.util.js";
 import { ApiResponse } from "../utils/api-response.util.js";
 import { updateUserStats } from "../services/user.service.js";
 import {
-    getLast20Transactions,
+    getLast100Transactions,
     createTransaction,
     getTxnCountLast10Min,
 } from "../services/transaction.service.js";
@@ -203,7 +203,7 @@ const getHistory = asyncHandler(async (req, res) => {
     const user = await User.findOne({ name });
     if (!user) throw new ApiError(404, "user not found");
 
-    const transactions = await getLast20Transactions(user._id);
+    const transactions = await getLast100Transactions(user._id);
     if (!transactions) {
         throw new ApiError(500, "failed to fetch history");
     }
