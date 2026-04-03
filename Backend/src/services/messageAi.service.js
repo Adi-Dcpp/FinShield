@@ -29,7 +29,7 @@ const getGroqClient = () => {
 };
 
 // 🔥 MAIN FUNCTION (FOR MESSAGE DETECTOR)
-const generateMessageExplanation = async (text, signals, classification) => {
+const generateMessageExplanation = async (text, signals, classification, confidence_score) => {
   const groqClient = getGroqClient();
 
   // 🔹 fallback if no API
@@ -38,21 +38,31 @@ const generateMessageExplanation = async (text, signals, classification) => {
   }
 
   try {
+    const confidencePercent = Math.round((confidence_score || 0) * 100);
+    const confidenceLevel = (confidence_score || 0) > 0.8 ? "high" : (confidence_score || 0) > 0.5 ? "moderate" : "low";
+    const signalsArray = Array.isArray(signals) ? signals : [];
+
     const prompt = `
-You are a financial fraud detection assistant.
+You are an expert financial fraud detection assistant analyzing SMS messages for potential scams.
 
-Analyze the following message and explain why it is classified as ${classification}.
+**Message Analysis Request:**
 
-Message: "${text}"
-Detected Signals: ${signals.join(", ") || "None"}
+- **Message Text:** "${text || ''}"
+- **Detected Signals:** ${signalsArray.length > 0 ? signalsArray.join(", ") : "None detected"}
+- **AI Classification:** ${classification || 'UNKNOWN'}
+- **Model Confidence:** ${confidencePercent}% (${confidenceLevel} confidence)
 
-Instructions:
-- Write 1 to 3 short sentences
-- Be clear and user-friendly
-- Explain reasoning, not just labels
-- Avoid technical jargon
-- If fraud, warn the user
-- If safe, reassure briefly
+**Task:** Provide a clear, user-friendly explanation of why this message was classified as ${classification || 'UNKNOWN'}. Consider the confidence level and detected signals in your reasoning.
+
+**Guidelines:**
+- Write 2-4 concise sentences
+- Explain the key suspicious elements or safe indicators
+- Use the confidence score to qualify your assessment (e.g., "highly likely" for high confidence, "potentially" for low)
+- If classified as FRAUD, strongly warn the user and advise immediate action
+- If SUSPICIOUS, recommend caution and verification
+- If SAFE, provide reassurance with brief reasoning
+- Avoid technical jargon; keep it accessible
+- Base explanation on the message content and signals, not just the label
 `;
 
     // 🔁 Try models (fallback-safe)
@@ -66,8 +76,8 @@ Instructions:
               content: prompt,
             },
           ],
-          temperature: 0.4,
-          max_tokens: 120,
+          temperature: 0.3,
+          max_tokens: 150,
         });
 
         const aiText = response?.choices?.[0]?.message?.content?.trim();
@@ -98,5 +108,4 @@ Instructions:
   }
 };
 
-// ✅ EXPORT (CommonJS)
 export { generateMessageExplanation };

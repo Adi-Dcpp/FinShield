@@ -8,9 +8,11 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test": "node --experimental-vm-modules ./node_modules/.bin/jest --runInBand"
   },
   "dependencies": {
+    "axios": "^1.14.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -23,6 +25,8 @@
     "sib-api-v3-sdk": "^8.5.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "jest": "^29.6.4",
+    "supertest": "^7.2.2"
   }
 }

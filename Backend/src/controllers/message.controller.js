@@ -1,71 +1,37 @@
-import {checkMessage} from "../services/message.service.js";
+import { analyzeMessage } from "../services/messageAnalyzer.service.js";
 import Message from "../models/message.model.js";
-import {generateMessageExplanation} from "../services/messageAi.service.js";
+import { generateMessageExplanation } from "../services/messageAi.service.js";
 import { asyncHandler } from "../utils/async-handler.util.js";
+import { ApiError } from "../utils/api-errors.util.js";
+import { ApiResponse } from "../utils/api-response.util.js"
 
 const checkMessageController = asyncHandler(async (req, res) => {
-  try {
-    const { text } = req.body;
-
-    // 🔹 Validation
-    if (!text) {
-      return res.status(400).json({
-        success: false,
-        error: "Message text is required.",
-      });
-    }
-
-    if (typeof text !== "string") {
-      return res.status(400).json({
-        success: false,
-        error: "Message text must be a string.",
-      });
-    }
-
-    // 🔹 1. Rule-based analysis
-    const result = checkMessage(text);
-
-    // 🔹 2. AI Enhancement (SAFE)
-    try {
-      const aiExplanation = await generateMessageExplanation(
-        text,
-        result.signals,
-        result.classification
-      );
-
-      if (aiExplanation) {
-        result.explanation = aiExplanation;
-      }
-    } catch (aiError) {
-      console.error("AI failed, using fallback:", aiError.message);
-    }
-
-    // 🔹 3. Save to DB (safe)
-    try {
-      await Message.create({
-        text,
-        classification: result.classification,
-        signals: result.signals,
-        explanation: result.explanation,
-        riskLevel: result.riskLevel,
-      });
-    } catch (dbError) {
-      console.error("DB save failed:", dbError.message);
-    }
-
-    // 🔹 4. Response
-    return res.status(200).json({
-      success: true,
-      data: result,
-    });
-
-  } catch (error) {
-    console.error("Error Checking Message:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal Server Error",
-    });
+  const { text } = req.body;
+  if (!(text.trim())) {
+    throw new ApiError(400, "Text not found")
   }
-});
+
+  const mlResponse = await analyzeMessage(text)
+  if (!mlResponse) {
+    throw new ApiError(500, "Internal server Error")
+  }
+
+  const messageExplanation = await generateMessageExplanation(text, mlResponse.data.signals, mlResponse.data.classification, mlResponse.data.confidence)
+  if (!messageExplanation) {
+    throw new ApiError(500, "Groq-API failure")
+  }
+
+  const response = {
+    ...mlResponse.data, "groq": messageExplanation
+  }
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      "Message Fetch Successfully",
+      response
+    )
+  )
+})
+
 
 export { checkMessageController };
