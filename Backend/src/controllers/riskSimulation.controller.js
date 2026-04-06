@@ -75,7 +75,11 @@ const getReview = asyncHandler(async (req, res) => {
             emailAlert = "SENT";
         } catch (err) {
             emailAlert = "FAILED";
-            console.error("Email failed:", err.message);
+            console.error("Email failed:", {
+                message: err.message,
+                status: err?.response?.status,
+                body: err?.response?.body || err?.response?.text,
+            });
         }
     }
 

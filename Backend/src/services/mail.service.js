@@ -13,6 +13,30 @@ const mailGenerator = new Mailgen({
   },
 });
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientBrevoError = (err) => {
+  const statusCode = err?.response?.status;
+
+  return (
+    !statusCode ||
+    statusCode === 408 ||
+    statusCode === 425 ||
+    statusCode === 429 ||
+    statusCode >= 500
+  );
+};
+
+const normalizeEmail = (value) => value?.trim().toLowerCase();
+
+const assertValidEmail = (label, value) => {
+  if (!value || !EMAIL_REGEX.test(value)) {
+    throw new Error(`Invalid ${label} email: ${value || "missing"}`);
+  }
+};
+
 export const sendFraudAlertEmail = async ({
   user,
   transaction,
@@ -25,6 +49,12 @@ export const sendFraudAlertEmail = async ({
   if (!process.env.BREVO_SENDER_EMAIL) {
     throw new Error("BREVO_SENDER_EMAIL is missing");
   }
+
+  const senderEmail = normalizeEmail(process.env.BREVO_SENDER_EMAIL);
+  const recipientEmail = normalizeEmail(user?.email);
+
+  assertValidEmail("sender", senderEmail);
+  assertValidEmail("recipient", recipientEmail);
 
   // Ensure the key is attached after env is loaded and before each send call.
   client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
@@ -70,24 +100,38 @@ export const sendFraudAlertEmail = async ({
   };
 
   const emailBody = mailGenerator.generate(email);
+  const maxAttempts = 3;
+  let lastError;
 
-  try {
-    await emailApi.sendTransacEmail({
-      sender: {
-        email: process.env.BREVO_SENDER_EMAIL,
-        name: "FinShield",
-      },
-      to: [{ email: user.email }],
-      subject: "🚨 FinShield Alert: High-Risk Transaction",
-      htmlContent: emailBody,
-    });
-  } catch (err) {
-    const providerMessage =
-      err?.response?.body?.message ||
-      err?.response?.text ||
-      err?.message ||
-      "unknown mail provider error";
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await emailApi.sendTransacEmail({
+        sender: {
+          email: senderEmail,
+          name: "FinShield",
+        },
+        to: [{ email: recipientEmail }],
+        subject: "🚨 FinShield Alert: High-Risk Transaction",
+        htmlContent: emailBody,
+      });
 
-    throw new Error(`Brevo send failed: ${providerMessage}`);
+      return;
+    } catch (err) {
+      lastError = err;
+
+      if (!isTransientBrevoError(err) || attempt === maxAttempts) {
+        break;
+      }
+
+      await delay(250 * attempt);
+    }
   }
+
+  const providerMessage =
+    lastError?.response?.body?.message ||
+    lastError?.response?.text ||
+    lastError?.message ||
+    "unknown mail provider error";
+
+  throw new Error(`Brevo send failed: ${providerMessage}`);
 };
