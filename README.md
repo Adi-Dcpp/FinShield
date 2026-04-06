@@ -245,20 +245,6 @@ FinShield uses the following external services/libraries:
 
 Please review and follow each provider/library license and usage terms before production deployment.
 
-## Project Credits
-
-### AI Services Credit
-
-- Kumar Gaurav Patel
-- Email: kgaurav3257
-- GitHub: https://github.com/KGaurav1207
-
-### Fraud Message Detection Credit
-
-- Chandan Kumar
-- Email: chandank6380@gmail.com
-- GitHub: https://github.com/Chandan9574
-
 ## Documentation Files
 
 - `prd.md`: Product requirements and architecture intent
